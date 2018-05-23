@@ -1,0 +1,249 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "oscropType": {
+      "type": "string",
+      "defaultValue": "Standard_LRS",
+      "allowedValues": [
+        "Standard_LRS",
+        "Standard_ZRS",
+        "Standard_GRS",
+        "Standard_RAGRS",
+        "Premium_LRS"
+      ]
+    },
+    "OsCropVMName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "OsCropVMAdminUserName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "OsCropVMAdminPassword": {
+      "type": "securestring"
+    },
+    "OsCropVMWindowsOSVersion": {
+      "type": "string",
+      "defaultValue": "2012-R2-Datacenter",
+      "allowedValues": [
+        "2008-R2-SP1",
+        "2012-Datacenter",
+        "2012-R2-Datacenter",
+        "Windows-Server-Technical-Preview"
+      ]
+    },
+    "OsCropPublicIPDnsName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "_artifactsLocation": {
+      "type": "string",
+      "metadata": {
+        "description": "Auto-generated container in staging storage account to receive post-build staging folder upload"
+      }
+    },
+    "_artifactsLocationSasToken": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Auto-generated token to access _artifactsLocation"
+      }
+    },
+
+    "OsCropWebPackage": {
+      "type": "string",
+      "defaultValue": "https://uttrining.blob.core.windows.net/oscroparm/cloudshop.zip"
+    }
+
+
+  },
+  "variables": {
+    "OsCropVnetPrefix": "10.0.0.0/16",
+    "OsCropVnetSubnet1Name": "FrontEndNet",
+    "OsCropVnetSubnet1Prefix": "10.0.0.0/24",
+    "OsCropVnetSubnet2Name": "DatabaseNet",
+    "OsCropVnetSubnet2Prefix": "10.0.1.0/24",
+    "oscropName": "[concat('oscrop', uniqueString(resourceGroup().id))]",
+    "OsCropVMImagePublisher": "MicrosoftWindowsServer",
+    "OsCropVMImageOffer": "WindowsServer",
+    "OsCropVMOSDiskName": "OsCropVMOSDisk",
+    "OsCropVMVmSize": "Standard_A1",
+    "OsCropVMVnetID": "[resourceId('Microsoft.Network/virtualNetworks', 'OsCropVnet')]",
+    "OsCropVMSubnetRef": "[concat(variables('OsCropVMVnetID'), '/subnets/', variables('OsCropVnetSubnet1Name'))]",
+    "OsCropVMStorageAccountContainerName": "vhds",
+    "OsCropVMNicName": "[concat(parameters('OsCropVMName'), 'NetworkInterface')]",
+    "OsCropPublicIPName": "OsCropPublicIP",
+    "OsCropDSCConfigurationFunction": "OsCropDSCConfiguration.ps1\\Main"
+
+  },
+  "resources": [
+    {
+      "name": "OsCropVnet",
+      "type": "Microsoft.Network/virtualNetworks",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [ ],
+      "tags": {
+        "displayName": "OsCropVnet"
+      },
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('OsCropVnetPrefix')]"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('OsCropVnetSubnet1Name')]",
+            "properties": {
+              "addressPrefix": "[variables('OsCropVnetSubnet1Prefix')]"
+            }
+          },
+          {
+            "name": "[variables('OsCropVnetSubnet2Name')]",
+            "properties": {
+              "addressPrefix": "[variables('OsCropVnetSubnet2Prefix')]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[variables('oscropName')]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [ ],
+      "tags": {
+        "displayName": "oscrop"
+      },
+      "properties": {
+        "accountType": "[parameters('oscropType')]"
+      }
+    },
+    {
+      "name": "[variables('OsCropVMNicName')]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [
+        "[concat('Microsoft.Network/virtualNetworks/', 'OsCropVnet')]",
+        "[concat('Microsoft.Network/publicIPAddresses/', variables('OsCropPublicIPName'))]"
+      ],
+      "tags": {
+        "displayName": "OsCropVMNic"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('OsCropVMSubnetRef')]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('OsCropPublicIPName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[parameters('OsCropVMName')]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [
+        "[concat('Microsoft.Storage/storageAccounts/', variables('oscropName'))]",
+        "[concat('Microsoft.Network/networkInterfaces/', variables('OsCropVMNicName'))]"
+      ],
+      "tags": {
+        "displayName": "OsCropVM"
+      },
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[variables('OsCropVMVmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[parameters('OsCropVMName')]",
+          "adminUsername": "[parameters('OsCropVMAdminUsername')]",
+          "adminPassword": "[parameters('OsCropVMAdminPassword')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[variables('OsCropVMImagePublisher')]",
+            "offer": "[variables('OsCropVMImageOffer')]",
+            "sku": "[parameters('OsCropVMWindowsOSVersion')]",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "OsCropVMOSDisk",
+            "vhd": {
+              "uri": "[concat('http://', variables('oscropName'), '.blob.core.windows.net/', variables('OsCropVMStorageAccountContainerName'), '/', variables('OsCropVMOSDiskName'), '.vhd')]"
+            },
+            "caching": "ReadWrite",
+            "createOption": "FromImage"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('OsCropVMNicName'))]"
+            }
+          ]
+        }
+      },
+      "resources": [
+        {
+          "name": "OsCropDSC",
+          "type": "extensions",
+          "location": "[resourceGroup().location]",
+          "apiVersion": "2015-06-15",
+          "dependsOn": [
+            "[concat('Microsoft.Compute/virtualMachines/', parameters('OsCropVMName'))]"
+          ],
+          "tags": {
+            "displayName": "OsCropDSC"
+          },
+          "properties": {
+            "publisher": "Microsoft.Powershell",
+            "type": "DSC",
+            "typeHandlerVersion": "2.9",
+            "autoUpgradeMinorVersion": true,
+            "settings": {
+              "modulesUrl": "[concat(parameters('_artifactsLocation'), '/', 'dsc.zip')]",
+              "sasToken": "[parameters('_artifactsLocationSasToken')]",
+              "configurationFunction": "[variables('OsCropDSCConfigurationFunction')]",
+              "properties": {
+                "nodeName": "[parameters('OsCropVMName')]",
+                "webDeployPackage": "[parameters('OsCropWebPackage')]"
+              }
+            },
+            "protectedSettings": { }
+          }
+        }
+      ]
+    },
+    {
+      "name": "[variables('OsCropPublicIPName')]",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [ ],
+      "tags": {
+        "displayName": "OsCropPublicIP"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Dynamic",
+        "dnsSettings": {
+          "domainNameLabel": "[parameters('OsCropPublicIPDnsName')]"
+        }
+      }
+    }
+  ],
+  "outputs": {
+  }
+}
